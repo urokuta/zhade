@@ -81,19 +81,15 @@ class sprite {
 	}
 	// Alright lets display the actual frame, shall we?
 	// Here we will make use of the saved frame offsets and palette data =D
-	public function displayFrame($frame=1) {
+	public function displayFrame($frame=0, $getData=false) {
 		// Once again, does the sprite has palette images, cuz then we will use the method to read that data, ignoring rgba frames
-		if($this->sHeader['num_pal'] > 0) {
-			// Some unneccessary security measures XD Input numbers and everything will be fine
+		if($this->sHeader['num_pal'] > 0) {		
+		
+			if($frame < 0) $frame = 0;//exit;
 			$frame = preg_replace("{[^0-9]}","", $frame);
-			// If frame == 0 then make it 1, do i have to explain that?
-			if($frame == 0) $frame = 1;
-			// ya ok.
-			if(!$frame) exit;
+			
 			// Does the given frame exceeds the max number of frames the spr has? kk
 			if($frame > $this->numberFrames) exit;
-			// Oh cool, so we set it to 1 just to subtract 1? Damn i am genius
-			$frame = $frame-1;
 			// Let's jump to the offset we saved while reading the sprite that corresponds to the frame number.
 			fseek($this->spr, $this->frames[$frame]['offset']);
 			// Lets make the image null just to be sure it hasnt been set before or smth
@@ -140,19 +136,22 @@ class sprite {
 				}
 				
 			}
+			
+			if ($getData)
+				return $im;
 			// Do some shiet to display the frame as .GIF
 			header("Cache-Control: no-cache");
-			header('Content-type: image/gif');
-			imagegif($im);
+			header('Content-type: image/png');
+			imagepng($im);
 			ImageDestroy($im);
 			// Alright, so it isn't a normal palette image sprite thingy but instead uses 32bit images, no problem dude
 		} elseif($this->sHeader['num_rgba'] > 0) {
 			// I cool and created whole new function just for that
-			$this->displayRGBAFrame($frame);
+			return $this->displayRGBAFrame($frame, $getData);
 		}
 	}
 	// Screw old palette depending images, RGBA images are the way to go
-	public function displayRGBAFrame($frame) {
+	public function displayRGBAFrame($frame, $getData = false) {
 		// same crap as before
 		$frame = preg_replace("{[^0-9]}","", $frame);
 		if($frame == 0) $frame = 1;
@@ -190,6 +189,11 @@ class sprite {
 				$bg_y--;
 			}
 		}
+
+		//part not tested !!!
+		if ($getData)
+			return $im;
+
 		// Alright now let's display our beauty. We have to use .PNG cuz of the uber transparency.
 		header("Cache-Control: no-cache");
 		header("Content-type: image/png");
@@ -219,6 +223,15 @@ class sprite {
 		}
 		echo "</table>\n";
 	}
+	
+	public function getTranspColor()
+	{
+		$color = $this->palette[0];
+		$color = explode(":",$color);
+		return array($color[0],$color[1],$color[2]);
+		 
+	}
+	
 	// Just keep it here alrite?
 	private function rgbhex($red, $green, $blue) {
 		return sprintf('#%02X%02X%02X', $red, $green, $blue);
@@ -254,7 +267,7 @@ class sprite {
 	// As far as I have tested this it works.
 	// So far it only displays the act files informations because I really got no nerve to make animated gifs using the informations
 	// Why you ask? Go read stuff about LZW-Compression (Lempel–Ziv–Welch) and do it yourself.
-	public function readAct($act) {
+	public function readAct($act, $aff = false) {
 		// Open the act file.
 		$this->act = fopen($act, "rb");
 		// Just like on the sprites we read some infos: ident=ACT, version, number of frames
@@ -317,9 +330,14 @@ class sprite {
 				// The end of the Patterns/Layers on the Frame.
 				// So lets see if it has some kind of sound attached to it? (To the frame)
 				$this->aAnimData[$anim][$nf] += unpack('lsoundNo', fread($this->act, 0x04));
-				// See if there are some extra info, if yes: Skip it, we dont need that crap
+				// See if there are some extra info, and store them
 				$extrainfo = unpack('lbool', fread($this->act, 0x04));
-				if($extrainfo['bool'] == 1) fseek($this->act, 0x10, SEEK_CUR);
+				if($extrainfo['bool'] == 1) {
+					fseek($this->act, 0x04, SEEK_CUR);
+					$this->aAnimData[$anim][$nf] += unpack('lextraX/lextraY', fread($this->act, 0x08));	
+					
+					fseek($this->act, 0x04, SEEK_CUR);
+					}
 			}
 			// Increase our Action and loop through the next frames and patterns^^
 			$anim++;
@@ -346,13 +364,87 @@ class sprite {
 			if((string)$id != 'numSounds')
 			$this->aSoundData[$id] = str_replace(pack('H2','00'),"",(pack('H*', $string['file'])));
 		}
-		// Lets display our results of the act file.
-		echo '<pre>';
-		echo print_r($this->aAnimData, true);
-		echo print_r($this->aSoundData, true);
-		echo '</pre>';
-		// Close the file, its no longer needed. =(
+
+		if ($aff)
+		{
+			// Lets display our results of the act file.
+			echo '<pre>';
+			echo print_r($this->aAnimData, true);
+			echo print_r($this->aSoundData, true);
+			echo '</pre>';
+			// Close the file, its no longer needed. =(
+		}
+		
 		fclose($this->act);
+	}
+	
+	public function getActData()
+	{
+		return $this->aAnimData;
+	}
+	
+	
+	public function getPngData($frame)
+	{
+		return $this->displayFrame($frame, true);
+	}
+	
+
+	//get all information needed
+	public function getDataPrepared($fMajor, $fMinor, $fsub=0)
+	{
+		$im = $this->getPngData($this->aAnimData[$fMajor][$fMinor][$fsub]["sprNo"]);
+
+		if ($this->aAnimData[$fMajor][$fMinor][$fsub]["mirrored"] == 1)
+			$im = $this->mirror($im);
+		
+		$xIM = $this->aAnimData[$fMajor][$fMinor][$fsub]["xOffset"];
+		$yIM = $this->aAnimData[$fMajor][$fMinor][$fsub]["yOffset"];
+
+		$wim = imagesx($im);
+		$him =	imagesy($im);
+		
+		if (isset($this->aAnimData[$fMajor][$fMinor][$fsub]["sprWidth"]))
+		{
+			$wim = $this->aAnimData[$fMajor][$fMinor][$fsub]["sprWidth"];
+		}
+		
+		if (isset($this->aAnimData[$fMajor][$fMinor][$fsub]["sprHeight"]))
+			$him = $this->aAnimData[$fMajor][$fMinor][$fsub]["sprHeight"];
+		
+		$exX = $exY = 0;
+		if (isset($this->aAnimData[$fMajor][$fMinor]["extraX"]))
+			$exX = $this->aAnimData[$fMajor][$fMinor]["extraX"];
+		if (isset($this->aAnimData[$fMajor][$fMinor]["extraY"]))
+			$exY = $this->aAnimData[$fMajor][$fMinor]["extraY"];
+	
+		return array($im, $wim, $him, $xIM, $yIM, $exX, $exY);
+	}
+	
+	function mirror($im)
+	{
+		$nWidth = imagesx($im);
+		$nHeight = imagesy($im);
+		
+		$transp_col = imagecolorat($im,0,0);
+		
+		$newImg = imagecreatetruecolor($nWidth, $nHeight);
+		imagealphablending($newImg, false);
+		imagesavealpha($newImg,true);
+		ImageColorTransparent($newImg, $transp_col);
+		$transparent = imagecolorallocatealpha($newImg, $transp_col[0], $transp_col[1], $transp_col[2], 127);
+		imagefilledrectangle($newImg, 0, 0, $nWidth, $nHeight, $transp_col);
+
+		 for($i = 0;$i < $nWidth; $i++)
+		 {
+		  for($j = 0;$j < $nHeight; $j++)
+		  {
+		   $ref = imagecolorat($im,$i,$j);
+		   imagesetpixel($newImg,$nWidth - $i,$j,$ref);
+		  }
+		 }
+		
+		return $newImg;
 	}
 }
 ?>
